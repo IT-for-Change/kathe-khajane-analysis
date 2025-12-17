@@ -26,11 +26,9 @@ logger.add(
 
 class StoryProcessorConfig:
     def __init__(self):
-        self.base_dir = PROJECT_ROOT
-
-        self.local_audio_dir = self.base_dir / "en_story_process" / "audio_inputs"
+        self.base_dir = Path(__file__).resolve().parent
+        self.local_audio_dir = self.base_dir / "audio_inputs"
         self.output_csv = self.base_dir / "stories_analysis.csv"
-
 
 class StoryProcessor:
 
