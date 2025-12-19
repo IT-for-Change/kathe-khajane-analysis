@@ -1,5 +1,6 @@
 import sys
 import re
+import csv
 from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
@@ -13,7 +14,6 @@ from speech_to_insights import (
     WhisperNLP,
     ResultWriter
 )
-
 
 logger.add(
     "story_processor.log",
@@ -30,6 +30,7 @@ class StoryProcessorConfig:
         self.local_audio_dir = self.base_dir / "audio_inputs"
         self.output_csv = self.base_dir / "stories_analysis.csv"
 
+
 class StoryProcessor:
 
     def __init__(self):
@@ -43,8 +44,22 @@ class StoryProcessor:
 
         self.writer = ResultWriter(self.config.output_csv)
 
-    def sanitize_filename(self, name: str) -> str:
-        return re.sub(r"[^\w\-]+", "_", name).strip("_")
+        # Load already processed audios from CSV
+        self.processed_audios = self._load_processed_audios()
+
+    def _load_processed_audios(self) -> set:
+        """Read CSV and return set of audio_file names already processed"""
+        processed = set()
+
+        if self.config.output_csv.exists():
+            with self.config.output_csv.open(newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    processed.add(row["audio_file"])
+
+            logger.info(f"Loaded {len(processed)} already processed audios")
+
+        return processed
 
     def list_audio_files(self):
         return sorted([
@@ -54,16 +69,25 @@ class StoryProcessor:
 
     def process_audio(self, audio_path: Path):
         try:
-            logger.info(f"Processing audio: {audio_path.name}")
 
-            transcription = self.nlp_engine.transcribe(audio_path)
-            text = transcription["text"]
+            if audio_path.name in self.processed_audios:
+                logger.info(f"Skipping (already analyzed): {audio_path.name}")
+                return
+
+            logger.info(f"Processing audio: {audio_path.name}")
 
             transcript_path = (
                 self.audio_manager.config.transcript_dir
                 / f"{audio_path.stem}.txt"
             )
-            transcript_path.write_text(text, encoding="utf-8")
+
+            if transcript_path.exists():
+                logger.info(f"Using existing transcript: {transcript_path.name}")
+                text = transcript_path.read_text(encoding="utf-8")
+            else:
+                transcription = self.nlp_engine.transcribe(audio_path)
+                text = transcription["text"]
+                transcript_path.write_text(text, encoding="utf-8")
 
             analysis = self.nlp_engine.analyze(text)
 
@@ -83,11 +107,12 @@ class StoryProcessor:
                 )
 
             self.writer.write_row(row)
+            self.processed_audios.add(audio_path.name)
+
             logger.success(f"Done: {audio_path.name}")
 
         except Exception:
             logger.exception(f"Failed audio: {audio_path.name}")
-
 
     def run(self):
         audio_files = self.list_audio_files()
